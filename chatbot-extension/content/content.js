@@ -159,7 +159,8 @@
 
   async function init() {
     await loadData();
-    if (!state.settings?.apiKey) return;
+    // Показываем виджет ТОЛЬКО если есть API ключ И сайт обучен
+    if (!state.settings?.apiKey || !state.siteData) return;
     createWidget();
     setupEventListeners();
     loadChatHistory();
