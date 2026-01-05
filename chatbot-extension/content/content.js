@@ -5,91 +5,43 @@
   if (window.AIChatbotLoaded) return;
   window.AIChatbotLoaded = true;
 
-  // ==================== ПАРСЕР (встроенный) ====================
+  // ==================== ПАРСЕР (простой и надёжный) ====================
 
-  const EXCLUDE_SELECTORS = [
-    'script', 'style', 'noscript', 'iframe', 'svg', 'canvas', 'video', 'audio',
-    'nav', 'footer', 'header', '.nav', '.navigation', '.menu', '.footer', '.header',
-    '.sidebar', '.advertisement', '.ad', '.ads', '.cookie', '.popup', '.modal',
-    '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '[aria-hidden="true"]'
-  ];
-
+  /**
+   * Простой парсер — берём ВЕСЬ видимый текст страницы через innerText
+   * Это стандартный подход Claude, Perplexity и других AI-инструментов
+   */
   function parsePageContent(doc = document) {
     const clone = doc.cloneNode(true);
-    EXCLUDE_SELECTORS.forEach(selector => {
-      clone.querySelectorAll(selector).forEach(el => el.remove());
-    });
+
+    // Удаляем только скрипты/стили (технический мусор)
+    clone.querySelectorAll('script, style, noscript, link, meta').forEach(el => el.remove());
 
     const content = [];
-    const title = clone.querySelector('title')?.textContent?.trim();
+
+    // 1. Заголовок страницы
+    const title = doc.title?.trim();
     if (title) content.push(`# ${title}`);
 
-    const metaDesc = clone.querySelector('meta[name="description"]')?.getAttribute('content');
+    // 2. Meta description (если есть)
+    const metaDesc = doc.querySelector('meta[name="description"]')?.getAttribute('content');
     if (metaDesc) content.push(metaDesc.trim());
 
-    const main = clone.querySelector('main, [role="main"], article, .content, #content') || clone.body;
-    if (main) {
-      // Заголовки
-      main.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
-        const level = parseInt(heading.tagName.charAt(1));
-        const text = heading.textContent?.trim();
-        if (text && text.length > 2) content.push(`\n${'#'.repeat(level)} ${text}`);
-      });
+    // 3. ВЕСЬ видимый текст страницы (innerText = только видимый текст)
+    const bodyText = clone.body?.innerText || '';
 
-      // Параграфы
-      main.querySelectorAll('p').forEach(p => {
-        const text = p.textContent?.trim();
-        if (text && text.length > 15) content.push(text);
-      });
+    // Очищаем: убираем лишние пробелы и пустые строки
+    const cleanedText = bodyText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n');
 
-      // Списки
-      main.querySelectorAll('ul, ol').forEach(list => {
-        list.querySelectorAll('li').forEach(item => {
-          const text = item.textContent?.trim();
-          if (text && text.length > 8) content.push(`• ${text}`);
-        });
-      });
-
-      // Цены и важные данные (span, div с короткими текстами - цены, характеристики)
-      main.querySelectorAll('[class*="price"], [class*="cost"], [class*="sum"], [data-price], .price, .cost').forEach(el => {
-        const text = el.textContent?.trim();
-        if (text && text.length > 0 && text.length < 100) content.push(`Цена: ${text}`);
-      });
-
-      // Блоки с текстом (div, span с содержательным текстом)
-      main.querySelectorAll('div, span, section, article').forEach(el => {
-        // Только прямой текст элемента (не вложенные)
-        const directText = Array.from(el.childNodes)
-          .filter(node => node.nodeType === Node.TEXT_NODE)
-          .map(node => node.textContent?.trim())
-          .filter(t => t && t.length > 10)
-          .join(' ');
-        if (directText && directText.length > 20 && directText.length < 500) {
-          content.push(directText);
-        }
-      });
-
-      // Карточки товаров/курсов (часто содержат важную инфу)
-      main.querySelectorAll('[class*="card"], [class*="product"], [class*="course"], [class*="item"]').forEach(card => {
-        const text = card.textContent?.trim().replace(/\s+/g, ' ');
-        if (text && text.length > 30 && text.length < 500) {
-          content.push(text);
-        }
-      });
-
-      // Таблицы
-      main.querySelectorAll('table').forEach(table => {
-        table.querySelectorAll('tr').forEach(row => {
-          const rowText = Array.from(row.querySelectorAll('td, th'))
-            .map(cell => cell.textContent?.trim())
-            .filter(Boolean)
-            .join(' | ');
-          if (rowText.length > 10) content.push(rowText);
-        });
-      });
+    if (cleanedText) {
+      content.push(cleanedText);
     }
 
-    return [...new Set(content)].join('\n\n');
+    return content.join('\n\n');
   }
 
   function getInternalLinks(doc = document) {
