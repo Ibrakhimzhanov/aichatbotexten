@@ -29,24 +29,55 @@
 
     const main = clone.querySelector('main, [role="main"], article, .content, #content') || clone.body;
     if (main) {
+      // Заголовки
       main.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
         const level = parseInt(heading.tagName.charAt(1));
         const text = heading.textContent?.trim();
         if (text && text.length > 2) content.push(`\n${'#'.repeat(level)} ${text}`);
       });
 
+      // Параграфы
       main.querySelectorAll('p').forEach(p => {
         const text = p.textContent?.trim();
-        if (text && text.length > 20) content.push(text);
+        if (text && text.length > 15) content.push(text);
       });
 
+      // Списки
       main.querySelectorAll('ul, ol').forEach(list => {
         list.querySelectorAll('li').forEach(item => {
           const text = item.textContent?.trim();
-          if (text && text.length > 10) content.push(`• ${text}`);
+          if (text && text.length > 8) content.push(`• ${text}`);
         });
       });
 
+      // Цены и важные данные (span, div с короткими текстами - цены, характеристики)
+      main.querySelectorAll('[class*="price"], [class*="cost"], [class*="sum"], [data-price], .price, .cost').forEach(el => {
+        const text = el.textContent?.trim();
+        if (text && text.length > 0 && text.length < 100) content.push(`Цена: ${text}`);
+      });
+
+      // Блоки с текстом (div, span с содержательным текстом)
+      main.querySelectorAll('div, span, section, article').forEach(el => {
+        // Только прямой текст элемента (не вложенные)
+        const directText = Array.from(el.childNodes)
+          .filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent?.trim())
+          .filter(t => t && t.length > 10)
+          .join(' ');
+        if (directText && directText.length > 20 && directText.length < 500) {
+          content.push(directText);
+        }
+      });
+
+      // Карточки товаров/курсов (часто содержат важную инфу)
+      main.querySelectorAll('[class*="card"], [class*="product"], [class*="course"], [class*="item"]').forEach(card => {
+        const text = card.textContent?.trim().replace(/\s+/g, ' ');
+        if (text && text.length > 30 && text.length < 500) {
+          content.push(text);
+        }
+      });
+
+      // Таблицы
       main.querySelectorAll('table').forEach(table => {
         table.querySelectorAll('tr').forEach(row => {
           const rowText = Array.from(row.querySelectorAll('td, th'))
