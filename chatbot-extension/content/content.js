@@ -188,7 +188,7 @@
       const data = await chrome.storage.local.get(['settings', 'usage', 'widget', `site:${domain}`, `history:${domain}`]);
       state.settings = data.settings || {};
       state.usage = data.usage || { messagesThisMonth: 0, monthStart: '' };
-      state.widget = data.widget || { color: '#4F46E5', position: 'bottom-right', botName: 'Помощник', avatar: null, greeting: 'Привет! Чем могу помочь?' };
+      state.widget = data.widget || { color: '#4F46E5', position: 'top-right', botName: 'Помощник', avatar: null, greeting: 'Привет! Чем могу помочь?' };
       state.siteData = data[`site:${domain}`] || null;
       state.messages = data[`history:${domain}`] || [];
     } catch (e) {

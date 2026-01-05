@@ -263,7 +263,7 @@ chrome.runtime.onInstalled.addListener((details) => {
       },
       widget: {
         color: '#4F46E5',
-        position: 'bottom-right',
+        position: 'top-right',
         botName: 'Помощник',
         avatar: null,
         greeting: 'Привет! Чем могу помочь?'

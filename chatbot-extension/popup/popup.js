@@ -74,7 +74,7 @@ function escapeHtml(text) {
 let state = {
   settings: { apiKey: '', plan: 'free', stripeEmail: null, proActivatedAt: null },
   usage: { messagesThisMonth: 0, monthStart: '', sitesCount: 0 },
-  widget: { color: '#4F46E5', position: 'bottom-right', botName: 'Помощник', avatar: null, greeting: 'Привет! Чем могу помочь?' },
+  widget: { color: '#4F46E5', position: 'top-right', botName: 'Помощник', avatar: null, greeting: 'Привет! Чем могу помочь?' },
   sites: [],
   currentTabUrl: ''
 };
