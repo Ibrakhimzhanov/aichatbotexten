@@ -446,8 +446,22 @@
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = chrome.runtime.getURL('content/parser.js');
-      script.onload = resolve;
-      script.onerror = reject;
+      script.onload = () => {
+        // Ждём пока window.AIChatbotParser будет определён
+        let attempts = 0;
+        const checkParser = () => {
+          if (window.AIChatbotParser) {
+            resolve();
+          } else if (attempts < 50) {
+            attempts++;
+            setTimeout(checkParser, 100);
+          } else {
+            reject(new Error('Parser не загрузился'));
+          }
+        };
+        checkParser();
+      };
+      script.onerror = () => reject(new Error('Не удалось загрузить parser.js'));
       document.head.appendChild(script);
     });
   }
