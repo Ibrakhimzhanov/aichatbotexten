@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Customer Support</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Заголовок -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🤖</span>
+        <span class="logo-text">AI Customer Support</span>
+      </div>
+    </header>
+
+    <!-- Секция API ключа -->
+    <section class="section">
+      <label class="label">API ключ OpenAI:</label>
+      <div class="input-group">
+        <input
+          type="password"
+          id="apiKey"
+          class="input"
+          placeholder="sk-..."
+        >
+        <button id="toggleKey" class="btn-icon" title="Показать/скрыть">
+          👁️
+        </button>
+      </div>
+      <button id="saveKey" class="btn btn-primary">
+        💾 Сохранить ключ
+      </button>
+      <div id="keyStatus" class="status"></div>
+    </section>
+
+    <!-- Секция статуса -->
+    <section class="section">
+      <div class="stats">
+        <div class="stat-row">
+          <span class="stat-label">📊 Статус:</span>
+          <span id="planStatus" class="stat-value badge">Free</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">💬 Сообщений:</span>
+          <span id="messagesCount" class="stat-value">0/50 в этом месяце</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">🌐 Сайтов:</span>
+          <span id="sitesCount" class="stat-value">0/1</span>
+        </div>
+      </div>
+      <button id="upgradePro" class="btn btn-upgrade">
+        ⭐ Перейти на Pro $9.99/мес
+      </button>
+    </section>
+
+    <!-- Секция Pro активации (скрыта по умолчанию) -->
+    <section id="proActivation" class="section hidden">
+      <label class="label">Активировать Pro:</label>
+      <div class="input-group">
+        <input
+          type="email"
+          id="proEmail"
+          class="input"
+          placeholder="Email оплаты в Stripe"
+        >
+      </div>
+      <button id="activatePro" class="btn btn-primary">
+        ✓ Активировать Pro
+      </button>
+      <div id="proStatus" class="status"></div>
+    </section>
+
+    <!-- Секция текущего сайта -->
+    <section class="section">
+      <div class="current-site">
+        <span class="site-label">Текущий сайт:</span>
+        <span id="currentSite" class="site-url">—</span>
+      </div>
+      <button id="trainSite" class="btn btn-secondary">
+        📚 Обучить на этом сайте
+      </button>
+      <div id="trainStatus" class="status"></div>
+      <div id="trainProgress" class="progress-container hidden">
+        <div class="progress-bar">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+        <span id="progressText" class="progress-text">0/5 страниц</span>
+      </div>
+    </section>
+
+    <!-- Секция обученных сайтов -->
+    <section class="section">
+      <div class="trained-sites">
+        <span class="label">Обученные сайты:</span>
+        <ul id="sitesList" class="sites-list">
+          <li class="empty-state">Нет обученных сайтов</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Секция настроек виджета (только Pro) -->
+    <section id="widgetSettings" class="section widget-settings">
+      <div class="section-header">
+        <span class="label">⚙️ Настройки виджета</span>
+        <span id="proOnlyBadge" class="badge badge-locked">Pro</span>
+      </div>
+      <div id="widgetSettingsContent" class="settings-content disabled">
+        <div class="setting-row">
+          <label>Цвет:</label>
+          <input type="color" id="widgetColor" value="#4F46E5">
+        </div>
+        <div class="setting-row">
+          <label>Позиция:</label>
+          <select id="widgetPosition">
+            <option value="bottom-right">Справа внизу</option>
+            <option value="bottom-left">Слева внизу</option>
+            <option value="top-right">Справа вверху</option>
+            <option value="top-left">Слева вверху</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Название бота:</label>
+          <input type="text" id="botName" class="input" value="Помощник" maxlength="30">
+        </div>
+        <div class="setting-row">
+          <label>Приветствие:</label>
+          <textarea id="greeting" class="input textarea" maxlength="200">Привет! Чем могу помочь?</textarea>
+        </div>
+        <button id="saveWidget" class="btn btn-primary">
+          💾 Сохранить настройки
+        </button>
+        <div id="widgetStatus" class="status"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
