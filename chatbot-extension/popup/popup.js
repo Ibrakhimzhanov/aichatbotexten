@@ -255,9 +255,10 @@ function setupEventListeners() {
   // Сохранить API ключ
   elements.saveKey.addEventListener('click', saveApiKey);
 
-  // Перейти на Pro
+  // Перейти на Pro (тестовый режим - без Stripe)
   elements.upgradePro.addEventListener('click', () => {
-    window.open(STRIPE_PAYMENT_LINK, '_blank');
+    // TODO: Раскомментировать для продакшена с реальным Stripe
+    // window.open(STRIPE_PAYMENT_LINK, '_blank');
     elements.proActivation.classList.remove('hidden');
   });
 
@@ -353,16 +354,28 @@ async function trainSite() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     // Сначала инжектим content script если его нет
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content/content.js']
-    }).catch(() => {});
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content/content.js']
+      });
+      // Даём время на инициализацию
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (e) {
+      console.log('Content script injection:', e.message);
+    }
 
     // Отправляем команду на парсинг
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 'startParsing',
-      maxPages: maxPages
-    });
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'startParsing',
+        maxPages: maxPages
+      });
+    } catch (e) {
+      // Если не удалось связаться - просим перезагрузить страницу
+      throw new Error('Перезагрузите страницу (F5) и попробуйте снова');
+    }
 
     if (response && response.success) {
       // Сохраняем результат
