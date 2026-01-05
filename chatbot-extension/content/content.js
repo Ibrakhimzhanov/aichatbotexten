@@ -1,11 +1,152 @@
-// content.js — Виджет чата AI Customer Support
+// content.js — Виджет чата AI Customer Support (с встроенным парсером)
 
 (function() {
   // Проверяем, не загружен ли уже виджет
   if (window.AIChatbotLoaded) return;
   window.AIChatbotLoaded = true;
 
-  // Состояние
+  // ==================== ПАРСЕР (встроенный) ====================
+
+  const EXCLUDE_SELECTORS = [
+    'script', 'style', 'noscript', 'iframe', 'svg', 'canvas', 'video', 'audio',
+    'nav', 'footer', 'header', '.nav', '.navigation', '.menu', '.footer', '.header',
+    '.sidebar', '.advertisement', '.ad', '.ads', '.cookie', '.popup', '.modal',
+    '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '[aria-hidden="true"]'
+  ];
+
+  function parsePageContent(doc = document) {
+    const clone = doc.cloneNode(true);
+    EXCLUDE_SELECTORS.forEach(selector => {
+      clone.querySelectorAll(selector).forEach(el => el.remove());
+    });
+
+    const content = [];
+    const title = clone.querySelector('title')?.textContent?.trim();
+    if (title) content.push(`# ${title}`);
+
+    const metaDesc = clone.querySelector('meta[name="description"]')?.getAttribute('content');
+    if (metaDesc) content.push(metaDesc.trim());
+
+    const main = clone.querySelector('main, [role="main"], article, .content, #content') || clone.body;
+    if (main) {
+      main.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
+        const level = parseInt(heading.tagName.charAt(1));
+        const text = heading.textContent?.trim();
+        if (text && text.length > 2) content.push(`\n${'#'.repeat(level)} ${text}`);
+      });
+
+      main.querySelectorAll('p').forEach(p => {
+        const text = p.textContent?.trim();
+        if (text && text.length > 20) content.push(text);
+      });
+
+      main.querySelectorAll('ul, ol').forEach(list => {
+        list.querySelectorAll('li').forEach(item => {
+          const text = item.textContent?.trim();
+          if (text && text.length > 10) content.push(`• ${text}`);
+        });
+      });
+
+      main.querySelectorAll('table').forEach(table => {
+        table.querySelectorAll('tr').forEach(row => {
+          const rowText = Array.from(row.querySelectorAll('td, th'))
+            .map(cell => cell.textContent?.trim())
+            .filter(Boolean)
+            .join(' | ');
+          if (rowText.length > 10) content.push(rowText);
+        });
+      });
+    }
+
+    return [...new Set(content)].join('\n\n');
+  }
+
+  function getInternalLinks(doc = document) {
+    const currentHost = window.location.hostname;
+    const currentPath = window.location.pathname;
+    const links = new Set();
+
+    doc.querySelectorAll('a[href]').forEach(link => {
+      try {
+        const url = new URL(link.href, window.location.origin);
+        if (url.hostname !== currentHost) return;
+        if (url.pathname === currentPath) return;
+        const ext = url.pathname.split('.').pop().toLowerCase();
+        if (['pdf', 'jpg', 'jpeg', 'png', 'gif', 'svg', 'zip', 'doc', 'docx'].includes(ext)) return;
+        if (['/wp-admin', '/admin', '/login', '/cart', '/checkout'].some(p => url.pathname.includes(p))) return;
+        links.add(`${url.origin}${url.pathname}`);
+      } catch (e) {}
+    });
+
+    const navLinks = [];
+    doc.querySelectorAll('nav a[href], [role="navigation"] a[href], .nav a[href], .menu a[href]').forEach(link => {
+      try {
+        const url = new URL(link.href, window.location.origin);
+        if (url.hostname === currentHost) navLinks.push(`${url.origin}${url.pathname}`);
+      } catch (e) {}
+    });
+
+    const otherLinks = [];
+    links.forEach(link => { if (!navLinks.includes(link)) otherLinks.push(link); });
+    return [...new Set(navLinks), ...otherLinks];
+  }
+
+  async function fetchPage(url) {
+    try {
+      const response = await fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'text/html' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const html = await response.text();
+      return new DOMParser().parseFromString(html, 'text/html');
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function parseSite(maxPages = 5, onProgress = null) {
+    const results = { title: document.title, pages: [], content: '', pagesCount: 0 };
+    const visited = new Set();
+    const toVisit = [window.location.href];
+
+    const currentContent = parsePageContent(document);
+    results.pages.push({ url: window.location.href, content: currentContent });
+    visited.add(window.location.href);
+    if (onProgress) onProgress(1, maxPages);
+
+    const links = getInternalLinks(document);
+    toVisit.push(...links);
+
+    while (toVisit.length > 0 && results.pages.length < maxPages) {
+      const url = toVisit.shift();
+      if (visited.has(url)) continue;
+      visited.add(url);
+
+      const doc = await fetchPage(url);
+      if (!doc) continue;
+
+      const pageContent = parsePageContent(doc);
+      if (pageContent.length > 100) {
+        results.pages.push({ url, content: pageContent });
+        if (onProgress) onProgress(results.pages.length, maxPages);
+
+        getInternalLinks(doc).forEach(link => {
+          if (!visited.has(link) && !toVisit.includes(link)) toVisit.push(link);
+        });
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    results.content = results.pages.map(p => `--- ${p.url} ---\n${p.content}`).join('\n\n');
+    const MAX_CONTENT_LENGTH = 50000;
+    if (results.content.length > MAX_CONTENT_LENGTH) {
+      results.content = results.content.slice(0, MAX_CONTENT_LENGTH) + '\n\n[Контент обрезан]';
+    }
+    results.pagesCount = results.pages.length;
+    return results;
+  }
+
+  // ==================== ВИДЖЕТ ====================
+
   let state = {
     isOpen: false,
     messages: [],
@@ -16,17 +157,14 @@
     isLoading: false
   };
 
-  // Rate limiting: минимальный интервал между сообщениями (мс)
   const MIN_MESSAGE_INTERVAL = 1000;
   let lastMessageTime = 0;
 
-  // Лимиты и настройки
   const FREE_MESSAGE_LIMIT = 50;
   const MAX_HISTORY_LENGTH = 100;
-  const ERROR_DISPLAY_TIME = 5000; // 5 секунд
-  const MAX_RECENT_MESSAGES = 10; // Для отправки в API
+  const ERROR_DISPLAY_TIME = 5000;
+  const MAX_RECENT_MESSAGES = 10;
 
-  // DOM элементы
   let elements = {
     container: null,
     button: null,
@@ -36,42 +174,21 @@
     sendBtn: null
   };
 
-  // Инициализация
   async function init() {
     await loadData();
-
-    // Если нет API ключа или сайт не обучен — не показываем виджет
-    if (!state.settings?.apiKey) {
-      // API ключ не настроен — не показываем виджет
-      return;
-    }
-
+    if (!state.settings?.apiKey) return;
     createWidget();
     setupEventListeners();
     loadChatHistory();
   }
 
-  // Загрузка данных из storage
   async function loadData() {
     try {
       const domain = window.location.hostname;
-      const data = await chrome.storage.local.get([
-        'settings',
-        'usage',
-        'widget',
-        `site:${domain}`,
-        `history:${domain}`
-      ]);
-
+      const data = await chrome.storage.local.get(['settings', 'usage', 'widget', `site:${domain}`, `history:${domain}`]);
       state.settings = data.settings || {};
       state.usage = data.usage || { messagesThisMonth: 0, monthStart: '' };
-      state.widget = data.widget || {
-        color: '#4F46E5',
-        position: 'bottom-right',
-        botName: 'Помощник',
-        avatar: null,
-        greeting: 'Привет! Чем могу помочь?'
-      };
+      state.widget = data.widget || { color: '#4F46E5', position: 'bottom-right', botName: 'Помощник', avatar: null, greeting: 'Привет! Чем могу помочь?' };
       state.siteData = data[`site:${domain}`] || null;
       state.messages = data[`history:${domain}`] || [];
     } catch (e) {
@@ -79,7 +196,6 @@
     }
   }
 
-  // Создание виджета
   function createWidget() {
     const positionClass = `position-${state.widget.position || 'bottom-right'}`;
     const color = state.widget.color || '#4F46E5';
@@ -97,9 +213,7 @@
       </button>
       <div class="chat-window">
         <div class="chat-header">
-          <div class="chat-avatar">
-            ${getSafeAvatarHtml(state.widget.avatar)}
-          </div>
+          <div class="chat-avatar">${getSafeAvatarHtml(state.widget.avatar)}</div>
           <div class="chat-header-info">
             <div class="chat-header-name">${escapeHtml(state.widget.botName || 'Помощник')}</div>
             <div class="chat-header-status">Онлайн</div>
@@ -108,24 +222,16 @@
         </div>
         <div class="chat-messages"></div>
         <div class="chat-input-container">
-          <textarea
-            class="chat-input"
-            placeholder="Напишите сообщение..."
-            rows="1"
-          ></textarea>
+          <textarea class="chat-input" placeholder="Напишите сообщение..." rows="1"></textarea>
           <button class="chat-send" aria-label="Отправить">
             <span class="chat-send-icon">➤</span>
           </button>
         </div>
-        <div class="chat-footer">
-          Powered by AI Chatbot
-        </div>
+        <div class="chat-footer">Powered by AI Chatbot</div>
       </div>
     `;
 
     document.body.appendChild(container);
-
-    // Сохраняем ссылки на элементы
     elements.container = container;
     elements.button = container.querySelector('.chat-button');
     elements.window = container.querySelector('.chat-window');
@@ -134,110 +240,67 @@
     elements.sendBtn = container.querySelector('.chat-send');
   }
 
-  // Настройка обработчиков событий
   function setupEventListeners() {
-    // Открытие/закрытие чата
     elements.button.addEventListener('click', toggleChat);
     elements.container.querySelector('.chat-close').addEventListener('click', toggleChat);
-
-    // Отправка сообщения
     elements.sendBtn.addEventListener('click', sendMessage);
     elements.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
-
-    // Автоматическое изменение высоты textarea
     elements.input.addEventListener('input', () => {
       elements.input.style.height = 'auto';
       elements.input.style.height = Math.min(elements.input.scrollHeight, 100) + 'px';
     });
-
-    // Слушаем сообщения от popup и background
     chrome.runtime.onMessage.addListener(handleMessage);
   }
 
-  // Переключение чата
   function toggleChat() {
     state.isOpen = !state.isOpen;
     elements.button.classList.toggle('open', state.isOpen);
     elements.window.classList.toggle('open', state.isOpen);
-
     if (state.isOpen) {
       elements.input.focus();
-
-      // Показываем приветствие или историю
-      if (state.messages.length === 0 && state.siteData) {
-        showGreeting();
-      } else if (!state.siteData) {
-        showNotTrained();
-      }
+      if (state.messages.length === 0 && state.siteData) showGreeting();
+      else if (!state.siteData) showNotTrained();
     }
   }
 
-  // Показать приветствие
   function showGreeting() {
-    const greeting = state.widget.greeting || 'Привет! Чем могу помочь?';
-    addMessage('assistant', greeting);
+    addMessage('assistant', state.widget.greeting || 'Привет! Чем могу помочь?');
   }
 
-  // Показать сообщение что сайт не обучен
   function showNotTrained() {
     elements.messages.innerHTML = `
       <div class="chat-welcome">
         <div class="chat-welcome-icon">📚</div>
-        <div class="chat-welcome-text">
-          Этот сайт ещё не обучен.<br>
-          Откройте расширение и нажмите<br>
-          "Обучить на этом сайте"
-        </div>
+        <div class="chat-welcome-text">Этот сайт ещё не обучен.<br>Откройте расширение и нажмите<br>"Обучить на этом сайте"</div>
       </div>
     `;
     elements.input.disabled = true;
     elements.sendBtn.disabled = true;
   }
 
-  // Загрузка истории чата
   function loadChatHistory() {
     if (state.messages.length > 0) {
-      state.messages.forEach(msg => {
-        renderMessage(msg.role, msg.text, msg.time, false);
-      });
+      state.messages.forEach(msg => renderMessage(msg.role, msg.text, msg.time, false));
       scrollToBottom();
     }
   }
 
-  // Добавление сообщения
   function addMessage(role, text) {
-    const message = {
-      role,
-      text,
-      time: new Date().toISOString()
-    };
-
+    const message = { role, text, time: new Date().toISOString() };
     state.messages.push(message);
     renderMessage(role, text, message.time);
     saveMessageToHistory(message);
     scrollToBottom();
   }
 
-  // Рендер сообщения
   function renderMessage(role, text, time, animate = true) {
-    const timeStr = new Date(time).toLocaleTimeString('ru-RU', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-    const avatar = role === 'assistant'
-      ? getSafeAvatarHtml(state.widget.avatar)
-      : '👤';
-
+    const timeStr = new Date(time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const avatar = role === 'assistant' ? getSafeAvatarHtml(state.widget.avatar) : '👤';
     const messageEl = document.createElement('div');
     messageEl.className = `message ${role}`;
     if (!animate) messageEl.style.animation = 'none';
-
     messageEl.innerHTML = `
       <div class="message-avatar">${avatar}</div>
       <div class="message-content">
@@ -245,15 +308,11 @@
         <div class="message-time">${timeStr}</div>
       </div>
     `;
-
-    // Убираем typing indicator если есть
     const typing = elements.messages.querySelector('.message.typing');
     if (typing) typing.remove();
-
     elements.messages.appendChild(messageEl);
   }
 
-  // Показать typing indicator
   function showTyping() {
     const typingEl = document.createElement('div');
     typingEl.className = 'message assistant typing';
@@ -273,20 +332,14 @@
     scrollToBottom();
   }
 
-  // Скролл вниз
   function scrollToBottom() {
     elements.messages.scrollTop = elements.messages.scrollHeight;
   }
 
-  /**
-   * Отправляет сообщение пользователя и получает ответ AI
-   * Включает проверку rate limiting и лимитов сообщений
-   */
   async function sendMessage() {
     const text = elements.input.value.trim();
     if (!text || state.isLoading) return;
 
-    // Rate limiting: защита от спама
     const now = Date.now();
     if (now - lastMessageTime < MIN_MESSAGE_INTERVAL) {
       showError('Подождите немного перед следующим сообщением');
@@ -294,17 +347,10 @@
     }
     lastMessageTime = now;
 
-    // Проверяем есть ли сайт
-    if (!state.siteData) {
-      showNotTrained();
-      return;
-    }
+    if (!state.siteData) { showNotTrained(); return; }
 
-    // Проверяем лимиты
     const isPro = state.settings.plan === 'pro';
     const messageLimit = isPro ? Infinity : FREE_MESSAGE_LIMIT;
-
-    // Проверяем и сбрасываем счётчик если новый месяц
     const currentMonth = new Date().toISOString().slice(0, 7);
     if (state.usage.monthStart !== currentMonth) {
       state.usage.messagesThisMonth = 0;
@@ -312,24 +358,18 @@
     }
 
     if (state.usage.messagesThisMonth >= messageLimit) {
-      showError(`Достигнут лимит сообщений (${messageLimit}/месяц). Перейдите на Pro для безлимита.`);
+      showError(`Достигнут лимит сообщений (${messageLimit}/месяц). Перейдите на Pro.`);
       return;
     }
 
-    // Добавляем сообщение пользователя
     addMessage('user', text);
     elements.input.value = '';
     elements.input.style.height = 'auto';
-
-    // Показываем typing
     state.isLoading = true;
     elements.sendBtn.disabled = true;
     showTyping();
 
     try {
-      // Отправляем запрос через background script
-      // Оптимизация: передаём siteId вместо полного контента (50KB)
-      // Service Worker получит контент из storage/кэша
       const response = await chrome.runtime.sendMessage({
         action: 'sendChatMessage',
         message: text,
@@ -340,8 +380,6 @@
 
       if (response.success) {
         addMessage('assistant', response.message);
-
-        // Инкрементируем счётчик
         state.usage.messagesThisMonth++;
         await chrome.storage.local.set({ usage: state.usage });
       } else {
@@ -350,8 +388,6 @@
     } catch (error) {
       console.error('[AI Chatbot] Ошибка:', error);
       showError(error.message || 'Произошла ошибка. Попробуйте позже.');
-
-      // Убираем typing
       const typing = elements.messages.querySelector('.message.typing');
       if (typing) typing.remove();
     } finally {
@@ -360,174 +396,81 @@
     }
   }
 
-  // Показать ошибку
   function showError(message) {
     const errorEl = document.createElement('div');
     errorEl.className = 'chat-error';
     errorEl.textContent = message;
     elements.messages.appendChild(errorEl);
     scrollToBottom();
-
-    setTimeout(() => {
-      errorEl.remove();
-    }, ERROR_DISPLAY_TIME);
+    setTimeout(() => errorEl.remove(), ERROR_DISPLAY_TIME);
   }
 
-  // Сохранение сообщения в историю (только Pro)
   async function saveMessageToHistory(message) {
     if (state.settings.plan !== 'pro') return;
-
     try {
       const domain = window.location.hostname;
-      const key = `history:${domain}`;
-      const history = state.messages.slice(-MAX_HISTORY_LENGTH); // Ограничиваем 100 сообщениями
-      await chrome.storage.local.set({ [key]: history });
+      await chrome.storage.local.set({ [`history:${domain}`]: state.messages.slice(-MAX_HISTORY_LENGTH) });
     } catch (e) {
       console.error('[AI Chatbot] Ошибка сохранения истории:', e);
     }
   }
 
-  // Обработка сообщений от popup/background
   function handleMessage(message, sender, sendResponse) {
     switch (message.action) {
       case 'startParsing':
         handleParsing(message.maxPages).then(sendResponse);
-        return true; // Асинхронный ответ
-
+        return true;
       case 'updateWidgetSettings':
         updateWidgetSettings(message.settings);
         sendResponse({ success: true });
         break;
-
       case 'ping':
         sendResponse({ success: true });
         break;
     }
   }
 
-  /**
-   * Обрабатывает парсинг сайта
-   * @param {number} maxPages - Максимальное количество страниц для парсинга
-   * @returns {Promise<{success: boolean, title?: string, content?: string, pagesCount?: number, error?: string}>}
-   */
   async function handleParsing(maxPages) {
     try {
-      // Загружаем parser.js если ещё не загружен
-      if (!window.AIChatbotParser) {
-        await loadParserScript();
-      }
-
-      const result = await window.AIChatbotParser.parseSite(maxPages, (current, total) => {
-        // Отправляем прогресс в popup
-        chrome.runtime.sendMessage({
-          action: 'parsingProgress',
-          current,
-          total
-        });
+      const result = await parseSite(maxPages, (current, total) => {
+        chrome.runtime.sendMessage({ action: 'parsingProgress', current, total });
       });
-
-      return {
-        success: true,
-        title: result.title,
-        content: result.content,
-        pagesCount: result.pagesCount
-      };
+      return { success: true, title: result.title, content: result.content, pagesCount: result.pagesCount };
     } catch (error) {
       console.error('[AI Chatbot] Ошибка парсинга:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
-  // Загрузка скрипта парсера
-  function loadParserScript() {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('content/parser.js');
-      script.onload = () => {
-        // Ждём пока window.AIChatbotParser будет определён
-        let attempts = 0;
-        const checkParser = () => {
-          if (window.AIChatbotParser) {
-            resolve();
-          } else if (attempts < 50) {
-            attempts++;
-            setTimeout(checkParser, 100);
-          } else {
-            reject(new Error('Parser не загрузился'));
-          }
-        };
-        checkParser();
-      };
-      script.onerror = () => reject(new Error('Не удалось загрузить parser.js'));
-      document.head.appendChild(script);
-    });
-  }
-
-  // Обновление настроек виджета
   function updateWidgetSettings(settings) {
     state.widget = { ...state.widget, ...settings };
-
     if (elements.container) {
-      // Обновляем цвет
       elements.container.style.setProperty('--widget-color', settings.color);
       elements.container.style.setProperty('--widget-color-hover', adjustColor(settings.color, -20));
-
-      // Обновляем позицию
       elements.container.className = `position-${settings.position}`;
-
-      // Обновляем название бота
       const nameEl = elements.container.querySelector('.chat-header-name');
       if (nameEl) nameEl.textContent = settings.botName;
-
-      // Обновляем аватар
       const avatarEl = elements.container.querySelector('.chat-avatar');
-      if (avatarEl) {
-        avatarEl.innerHTML = getSafeAvatarHtml(settings.avatar);
-      }
+      if (avatarEl) avatarEl.innerHTML = getSafeAvatarHtml(settings.avatar);
     }
   }
 
-  /**
-   * Экранирует HTML символы для предотвращения XSS
-   * @param {string} text - Текст для экранирования
-   * @returns {string} Экранированный текст
-   */
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
 
-
-  /**
-   * Проверяет валидность URL изображения (защита от XSS)
-   * @param {string} url - URL для проверки
-   * @returns {boolean} true если URL валидный
-   */
   function isValidImageUrl(url) {
     if (!url || typeof url !== 'string') return false;
     try {
       const parsed = new URL(url);
-      // Разрешаем только безопасные протоколы
       return ['http:', 'https:', 'data:'].includes(parsed.protocol);
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
-  /**
-   * Создаёт безопасный HTML для аватара
-   * @param {string} avatarUrl - URL аватара
-   * @param {string} [fallbackEmoji='🤖'] - Fallback emoji если URL невалидный
-   * @returns {string} HTML строка для аватара
-   */
   function getSafeAvatarHtml(avatarUrl, fallbackEmoji = '🤖') {
-    if (isValidImageUrl(avatarUrl)) {
-      return `<img src="${escapeHtml(avatarUrl)}" alt="Avatar">`;
-    }
+    if (isValidImageUrl(avatarUrl)) return `<img src="${escapeHtml(avatarUrl)}" alt="Avatar">`;
     return fallbackEmoji;
   }
 

@@ -46,8 +46,7 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "icons/*",
-        "content/parser.js"
+        "icons/*"
       ],
       "matches": [
         "<all_urls>"
