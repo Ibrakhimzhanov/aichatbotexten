@@ -288,7 +288,7 @@
     messageEl.innerHTML = `
       <div class="message-avatar">${avatar}</div>
       <div class="message-content">
-        <div class="message-bubble">${escapeHtml(text)}</div>
+        <div class="message-bubble">${formatMessageText(text)}</div>
         <div class="message-time">${timeStr}</div>
       </div>
     `;
@@ -443,6 +443,12 @@
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // Конвертирует переносы строк в <br> для отображения в HTML
+  function formatMessageText(text) {
+    const escaped = escapeHtml(text);
+    return escaped.replace(/\n/g, '<br>');
   }
 
   function isValidImageUrl(url) {
